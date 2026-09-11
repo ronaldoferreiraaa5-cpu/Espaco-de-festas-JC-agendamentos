@@ -158,7 +158,7 @@
   <section id="view-admin" class="section hidden" data-view>
     <button class="back" type="button" data-go="home">← Voltar ao site</button>
     <div class="admin-head"><div><p class="eyebrow">Visão operacional</p><h1>Painel administrativo</h1></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-outline btn-sm" id="seedDemo" type="button">Carregar dados de exemplo</button><button class="btn btn-outline btn-sm" id="clearDemo" type="button">Limpar dados locais</button></div></div>
-    <div class="tabs" role="tablist"><button class="tab active" data-tab="dash" role="tab">Dashboard</button><button class="tab" data-tab="kanban" role="tab">Kanban</button><button class="tab" data-tab="tickets" role="tab">Solicitações de atendimento <span class="count" id="ticketCount" style="display:none"></span></button><button class="tab" data-tab="config" role="tab">Configuração por espaço</button><button class="tab" data-tab="clients" role="tab">Clientes</button></div>
+    <div class="tabs" role="tablist"><button class="tab active" data-tab="dash" role="tab">Dashboard</button><button class="tab" data-tab="kanban" role="tab">Kanban</button><button class="tab" data-tab="tickets" role="tab">Solicitações de atendimento <span class="count" id="ticketCount" style="display:none"></span></button><button class="tab" data-tab="config" role="tab">Configuração por espaço</button><button class="tab" data-tab="clients" role="tab">Clientes</button><button class="tab" data-tab="users" role="tab">Usuários e acessos</button></div>
     <div id="adminBody"></div>
   </section>
 </main>
@@ -206,6 +206,10 @@
 <script>
 /* ===================== DADOS ===================== */
 const CONTACT={phone:'(11) 91143-0204',ig:'@jceventos204',address:'Avenida Diretriz, 204 · Jardim Mutinga · Barueri/SP',company:'JC Eventos 204'};
+const PRIMARY_ADMIN_EMAIL='ronaldoferreiraaa5@gmail.com';
+const emailKey=v=>String(v||'').trim().toLowerCase();
+function normalizeRole(u){if(!u)return null;return {...u,role:emailKey(u.email)===PRIMARY_ADMIN_EMAIL?'admin':(u.role||'client')}}
+function isAdmin(u=state?.user){return !!u&&normalizeRole(u).role==='admin'}
 const DEFAULT_SPACES={
   salao:{id:'salao',name:'Salão Principal',eyebrow:'JC Eventos 204',theme:'',
     description:'Estrutura completa para casamentos, eventos corporativos, aniversários e confraternizações, com espaço privativo climatizado, cozinha equipada e equipe de apoio inclusa.',
@@ -239,8 +243,8 @@ const DB={
   set(k,v){localStorage.setItem('jc204_'+k,JSON.stringify(v))},
   spaces(){const saved=this.get('spaces',{});const out={};for(const k in DEFAULT_SPACES)out[k]={...DEFAULT_SPACES[k],...(saved[k]||{})};return out},
   saveSpace(s){const saved=this.get('spaces',{});saved[s.id]={capacity:s.capacity,deposit:s.deposit,pixKey:s.pixKey,available:s.available,extras:s.extras,times:s.times,rules:s.rules};this.set('spaces',saved)},
-  users(){return this.get('users',[])},tickets(){return this.get('tickets',[])},bookings(){return this.get('bookings',[])},leads(){return this.get('leads',[])},
-  session(){return this.get('session',null)}
+  users(){const list=this.get('users',[]);let changed=false;list.forEach((u,i)=>{const next=normalizeRole(u);if(next.role!==u.role){list[i]=next;changed=true}});if(changed)this.set('users',list);return list},tickets(){return this.get('tickets',[])},bookings(){return this.get('bookings',[])},leads(){return this.get('leads',[])},
+  session(){const u=this.get('session',null);return normalizeRole(u)}
 };
 let spaces=DB.spaces();
 const state={clientQuery:'',clientFilter:'all',view:'home',space:'salao',cursor:new Date(CAL_START),selected:null,user:DB.session(),draft:null,step:0,adminTab:'dash',adminSpace:'salao',adminCursor:new Date(CAL_START),authMode:'signup'};
@@ -266,7 +270,7 @@ function bookingsOf(spaceId){return DB.bookings().filter(b=>b.space===spaceId)}
 function logLead(stage){if(!state.user)return;const leads=DB.leads();const i=leads.findIndex(l=>l.userId===state.user.id&&l.space===state.space);const lead={userId:state.user.id,space:state.space,stage,at:new Date().toISOString(),date:state.selected||null};if(i>=0)leads[i]={...leads[i],...lead};else leads.push(lead);DB.set('leads',leads)}
 
 /* ===================== SESSÃO ===================== */
-function setUser(u){state.user=u;DB.set('session',u);$('#whoAmI').textContent=u?`Olá, ${u.name.split(' ')[0]}`:'';$('#accountBtn .nav-label').textContent=u?'Sair':'Entrar';$('#mineBtn').classList.toggle('hidden',!u)}
+function setUser(u){u=normalizeRole(u);state.user=u;DB.set('session',u);$('#whoAmI').textContent=u?`Olá, ${u.name.split(' ')[0]}`:'';$('#accountBtn .nav-label').textContent=u?'Sair':'Entrar';$('#mineBtn').classList.toggle('hidden',!u)}
 let afterAuth=null;
 function requireAuth(cb){if(state.user)return cb();afterAuth=cb;openAuth('signup')}
 function openAuth(mode){state.authMode=mode;const signup=mode==='signup';$('#authTitle').textContent=signup?'Criar conta':'Entrar';$('#authSubmit').textContent=signup?'Criar conta':'Entrar';$('#switchAuth').textContent=signup?'Já tenho conta':'Criar nova conta';['aName','aCpf','aPhone'].forEach(id=>{const f=$('#'+id).closest('.field');f.classList.toggle('hidden',!signup);$('#'+id).required=signup});$('#authForm .check').classList.toggle('hidden',!signup);$('#authForm .check input').required=signup;modal('authModal')}
@@ -280,7 +284,7 @@ $('#authForm').onsubmit=e=>{e.preventDefault();const f=e.target;const d=Object.f
   if(!validCpf(d.cpf)){$('#cpfHint').textContent='CPF inválido';$('#cpfHint').className='hint err';return}
   if(d.phone.replace(/\D/g,'').length<11){$('#phoneHint').textContent='Informe DDD + celular';$('#phoneHint').className='hint err';return}
   if(users.some(x=>x.email.toLowerCase()===d.email.toLowerCase()))return toast('E-mail já cadastrado. Entre com sua senha.');
-  const u={id:'U'+Date.now().toString(36),name:d.name.trim(),email:d.email.trim(),cpf:d.cpf,phone:d.phone,password:d.password,provider:'email',createdAt:new Date().toISOString()};users.push(u);DB.set('users',users);finishAuth(u)};
+  const u={id:'U'+Date.now().toString(36),name:d.name.trim(),email:d.email.trim(),cpf:d.cpf,phone:d.phone,password:d.password,provider:'email',role:emailKey(d.email)===PRIMARY_ADMIN_EMAIL?'admin':'client',createdAt:new Date().toISOString()};users.push(u);DB.set('users',users);finishAuth(u)};
 function finishAuth(u){const pub={...u};delete pub.password;setUser(pub);modal('authModal',false);$('#authForm').reset();if(state.view==='space')logLead('viewed');if(afterAuth){const cb=afterAuth;afterAuth=null;cb()}else toast(`Bem-vindo, ${u.name.split(' ')[0]}`)}
 $('#accountBtn').onclick=()=>{if(state.user){setUser(null);toast('Sessão encerrada');if(state.view==='booking'||state.view==='mine')go('home')}else openAuth('login')};
 $('#mineBtn').onclick=()=>requireAuth(()=>{go('mine');renderMine()});
@@ -402,9 +406,8 @@ function moveDialog(id){const b=DB.bookings().find(x=>x.id===id),s=spaces[b.spac
 function bindDetailClose(){$$('#detailBody [data-close]').forEach(x=>x.onclick=()=>modal('detailModal',false))}
 
 /* ===================== ADMIN ===================== */
-$('#adminBtn').onclick=()=>{if(sessionStorage.getItem('jc204_admin'))return openAdmin();modal('adminGate')};
-$('#gateForm').onsubmit=e=>{e.preventDefault();if($('#gatePass').value!=='admin')return toast('Senha incorreta (use: admin)');sessionStorage.setItem('jc204_admin','1');modal('adminGate',false);$('#gatePass').value='';openAdmin()};
-function openAdmin(){spaces=DB.spaces();go('admin');renderAdmin()}
+$('#adminBtn').onclick=()=>{if(isAdmin())return openAdmin();if(state.user)return toast('Sua conta não possui acesso administrativo');afterAuth=()=>isAdmin()?openAdmin():toast('Sua conta não possui acesso administrativo');openAuth('login')};
+function openAdmin(){if(!isAdmin())return toast('Acesso permitido somente para administradores');spaces=DB.spaces();go('admin');renderAdmin()}
 $$('.tab').forEach(t=>t.onclick=()=>{state.adminTab=t.dataset.tab;$$('.tab').forEach(x=>x.classList.toggle('active',x===t));renderAdmin()});
 function renderAdmin(){const body=$('#adminBody'),bk=DB.bookings(),users=DB.users(),leads=DB.leads(),tickets=DB.tickets();const openT=tickets.filter(t=>t.status!=='concluido').length;const tc=$('#ticketCount');tc.textContent=openT;tc.style.display=openT?'inline-block':'none';const userOf=id=>users.find(u=>u.id===id)||{name:'Cliente',email:'',phone:''};
   const active=bk.filter(b=>b.status!=='cancelled');const leadsOnly=leads.filter(l=>!active.some(b=>b.userId===l.userId&&b.space===l.space));
@@ -437,6 +440,11 @@ function renderAdmin(){const body=$('#adminBody'),bk=DB.bookings(),users=DB.user
     $$('[data-aspace]').forEach(b=>b.onclick=()=>{state.adminSpace=b.dataset.aspace;renderAdmin()});$('#addExtra').onclick=()=>{$('#extrasRows').insertAdjacentHTML('beforeend',extraRow({id:'x'+Date.now().toString(36),name:'',price:0,max:10},$$('#extrasRows .xrow').length));$('#extrasRows .xrow:last-child [name=xname]').focus();bindRemove()};const bindRemove=()=>$$('[data-rm]').forEach(b=>b.onclick=()=>b.closest('.xrow').remove());bindRemove();$('#aPrev').onclick=()=>{c.setMonth(c.getMonth()-1);renderAdmin()};$('#aNext').onclick=()=>{c.setMonth(c.getMonth()+1);renderAdmin()};
     $$('#aCal [data-date]').forEach(b=>b.onclick=()=>adminDate(s,b.dataset.date));
     $('#cfgForm').onsubmit=e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));s.capacity=+f.capacity;s.deposit=+f.deposit;s.pixKey=f.pixKey.trim();s.times={setupFrom:f.setupFrom,start:f.start,end:f.end,duration:+f.duration,teardownUntil:f.teardownUntil};s.rules=f.rules.split('\n').map(x=>x.trim()).filter(Boolean);s.extras=$$('#extrasRows .xrow').map(r=>({id:r.dataset.id,name:r.querySelector('[name=xname]').value.trim(),price:+r.querySelector('[name=xprice]').value||0,max:+r.querySelector('[name=xmax]').value||0})).filter(x=>x.name);DB.saveSpace(s);spaces=DB.spaces();toast('Configuração salva');renderAdmin()}}
+  else if(state.adminTab==='users'){
+    const rows=users.slice().sort((a,b)=>(a.role==='admin'?-1:1)-(b.role==='admin'?-1:1)||a.name.localeCompare(b.name,'pt-BR')).map(u=>{const primary=emailKey(u.email)===PRIMARY_ADMIN_EMAIL;const admin=normalizeRole(u).role==='admin';return `<tr><td><strong>${esc(u.name)}</strong>${primary?' <span class="badge confirmed">Principal</span>':''}</td><td>${esc(u.email)}</td><td><span class="badge ${admin?'confirmed':'lead'}">${admin?'Administrador':'Cliente'}</span></td><td>${primary?'<span class="muted">Protegido</span>':`<button class="btn btn-outline btn-sm" type="button" data-user-role="${esc(u.id)}|${admin?'client':'admin'}">${admin?'Remover acesso de admin':'Tornar administrador'}</button>`}</td></tr>`}).join('');
+    body.innerHTML=`<div class="config-grid"><form class="panel" id="createUserForm"><p class="eyebrow">Nova conta</p><h2>Criar usuário</h2><p class="notice" style="margin:14px 0">O e-mail <strong>${PRIMARY_ADMIN_EMAIL}</strong> é o administrador principal e não pode perder essa permissão.</p><div class="form-grid"><div class="field full"><label for="uName">Nome completo</label><input id="uName" name="name" autocomplete="off" required></div><div class="field full"><label for="uEmail">E-mail</label><input id="uEmail" name="email" type="email" autocomplete="off" required></div><div class="field"><label for="uPass">Senha inicial</label><input id="uPass" name="password" type="password" minlength="6" autocomplete="new-password" placeholder="mínimo 6 caracteres" required></div><div class="field"><label for="uRole">Perfil de acesso</label><select id="uRole" name="role"><option value="client">Cliente</option><option value="admin">Administrador</option></select></div></div><p class="hint" style="margin-top:12px">Como este é um protótipo estático, usuários e permissões ficam salvos somente neste navegador.</p><div class="form-actions"><span></span><button class="btn btn-dark" type="submit">Criar usuário</button></div></form><div class="panel"><div class="section-title" style="margin:0 0 14px"><div><p class="eyebrow">Controle de acesso</p><h2>Usuários cadastrados</h2></div><span class="muted">${users.length} conta(s)</span></div>${rows?`<div class="table-wrap"><table class="table"><thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Ação</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<p class="empty">Nenhuma conta criada neste navegador. Crie primeiro a conta do administrador principal.</p>'}</div></div>`;
+    $('#createUserForm').onsubmit=e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target)),email=emailKey(f.email),list=DB.users();if(list.some(u=>emailKey(u.email)===email))return toast('E-mail já cadastrado');const u=normalizeRole({id:'U'+Date.now().toString(36),name:f.name.trim(),email,password:f.password,cpf:'',phone:'',provider:'email',role:f.role,createdAt:new Date().toISOString()});list.push(u);DB.set('users',list);toast(`Usuário criado como ${u.role==='admin'?'administrador':'cliente'}`);renderAdmin()};
+    $$('[data-user-role]').forEach(b=>b.onclick=()=>{const[id,role]=b.dataset.userRole.split('|'),list=DB.users(),u=list.find(x=>x.id===id);if(!u)return;if(emailKey(u.email)===PRIMARY_ADMIN_EMAIL)return toast('O administrador principal não pode ser alterado');if(u.id===state.user.id&&role!=='admin')return toast('Você não pode remover seu próprio acesso');u.role=role;DB.set('users',list);toast(role==='admin'?'Acesso administrativo concedido':'Acesso administrativo removido');renderAdmin()})}
   else{const norm=v=>String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');const digits=v=>String(v||'').replace(/\D/g,'');const q=norm(state.clientQuery.trim()),qd=digits(state.clientQuery);
     const manualClients=bk.filter(b=>b.manual&&!users.some(u=>u.phone&&u.phone===b.clientPhone)).reduce((m,b)=>{const key=b.clientPhone||b.clientEmail||b.clientName;if(!m[key])m[key]={id:'M'+key,name:b.clientName,email:b.clientEmail,phone:b.clientPhone,cpf:'',provider:'manual',createdAt:b.createdAt,manual:true};return m},{});
     const all=[...users,...Object.values(manualClients)];
